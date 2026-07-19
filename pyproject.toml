@@ -1,0 +1,41 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "subforge"
+version = "0.2.0"
+description = "Subtitle forge from Chinese ASR — turn audio into editable SRT/VTT/LRC subtitles with multi-speaker diarization and a built-in web UI"
+readme = "README.md"
+requires-python = ">=3.10"
+license = { text = "MIT" }
+authors = [{ name = "subforge contributors" }]
+keywords = ["asr", "speech-recognition", "paraformer", "sensevoice", "funasr", "modelscope", "chinese", "subtitles", "srt", "vtt", "lrc"]
+
+# 已通过 conda 安装，不在 pip 依赖里约束（环境相关的 CUDA 轮子）
+dependencies = [
+    "pyyaml>=6.0",
+    "fastapi>=0.110",
+    "uvicorn[standard]>=0.27",
+    "python-multipart>=0.0.9",
+    "websockets>=12",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0",
+    "httpx>=0.27",
+]
+
+[project.scripts]
+asr = "subforge.cli:main"
+
+[tool.setuptools]
+packages = ["subforge"]
+include-package-data = true
+
+[tool.setuptools.package-data]
+subforge = ["py.typed"]
+
+[tool.setuptools.package_dir]
+"" = "."

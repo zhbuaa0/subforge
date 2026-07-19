@@ -1,0 +1,64 @@
+# paraformer-asr 模型注册表
+#
+# 字段说明：
+#   model        —— 必填，ModelScope / HuggingFace 模型 ID（funasr.AutoModel 接受）
+#   vad_model    —— 可选，VAD 子模型（无则跳过 VAD）
+#   punc_model   —— 可选，标点恢复子模型（无则跳过标点）
+#   spk_model    —— 可选，说话人识别子模型（无则 spk 字段为 null）
+#   init         —— 传给 AutoModel(...) 构造器的额外参数（如 disable_update）
+#   generate     —— 传给 model.generate(...) 的默认运行时参数
+#                  preset_spk_num 不写 ⇒ 自动检测（FunASR 内部用谱聚类 + eigengap）
+#   postprocess  —— 后处理钩子名称（如 "rich_transcription" 用于 SenseVoice）
+#   streaming    —— 是否为流式专用模型（必须用 -online 模型 + 每连接独立 cache）
+#   features     —— 元数据，用于 CLI/服务能力自检与提示
+
+default: paraformer-zh
+
+models:
+  paraformer-zh:
+    model: iic/speech_paraformer-large-vad-punc-spk_asr_nat-zh-cn
+    vad_model: iic/speech_fsmn_vad_zh-cn-16k-common-pytorch
+    punc_model: iic/punc_ct-transformer_zh-cn-common-vocab272727-pytorch
+    spk_model: iic/speech_campplus_sv_zh-cn_16k-common
+    init:
+      disable_update: true
+    generate:
+      batch_size_s: 300
+    features:
+      timestamps: true
+      speakers: true
+      punc: true
+      multilingual: false
+      streaming: false
+
+  sensevoice:
+    model: iic/SenseVoiceSmall
+    init:
+      disable_update: true
+    generate:
+      language: auto
+      use_itn: true
+      batch_size_s: 300
+    postprocess: rich_transcription
+    features:
+      timestamps: false  # SenseVoice 默认输出段级文本，无 sentence_info
+      speakers: false
+      punc: true
+      multilingual: true  # zh/en/yue/ja/ko
+      streaming: false
+
+  paraformer-zh-streaming:
+    model: iic/speech_paraformer-large_asr_nat-zh-cn-16k-common-vocab8404-online
+    init:
+      disable_update: true
+    streaming: true
+    generate:
+      chunk_size: [0, 10, 5]
+      encoder_chunk_look_back: 4
+      decoder_chunk_look_back: 1
+    features:
+      timestamps: false
+      speakers: false
+      punc: true
+      multilingual: false
+      streaming: true

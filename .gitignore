@@ -1,0 +1,80 @@
+# ---- Python ----
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+MANIFEST
+
+# ---- Virtual environments ----
+.venv/
+venv/
+env/
+ENV/
+env.bak/
+venv.bak/
+
+# ---- IDE / Editor ----
+.idea/
+.vscode/
+*.swp
+*.swo
+.DS_Store
+Thumbs.db
+
+# ---- Test / coverage ----
+.pytest_cache/
+.coverage
+.coverage.*
+htmlcov/
+.tox/
+.coverage
+coverage.xml
+*.cover
+
+# ---- Logs ----
+*.log
+logs/
+
+# ---- Type checkers / linters ----
+.mypy_cache/
+.ruff_cache/
+
+# ---- Project-specific ----
+
+# Verification outputs (re-creatable by running scripts/verify_phase*.py)
+output/
+
+# Sample C3142 transcription outputs (kept locally for reference, not in repo)
+C3142_result.json
+C3142_transcript.txt
+C3142_transcript.md
+
+# Local environment / secrets — never commit
+.env
+.env.*
+*.pem
+*.key
+secrets/
+local_config.*
+
+# ---- FunASR / ModelScope caches ----
+# (These live under ~/.cache/modelscope/ in user home, not in repo,
+#  but in case someone runs funasr from repo dir:)
+.cache/
+funasr_cache/

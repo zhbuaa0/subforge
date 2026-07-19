@@ -1,0 +1,575 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>paraformer-asr · 语音识别 Web UI</title>
+  <style>
+    :root {
+      --bg: #0f1115;
+      --panel: #161a22;
+      --panel-2: #1d222c;
+      --border: #2a313d;
+      --text: #e6e9ef;
+      --text-dim: #9aa3b2;
+      --accent: #5b9cff;
+      --accent-2: #4a86e4;
+      --ok: #4ade80;
+      --warn: #fbbf24;
+      --err: #f87171;
+      --spk1: #60a5fa;
+      --spk2: #fb923c;
+      --spk3: #a78bfa;
+      --spk4: #34d399;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC",
+                   "Microsoft YaHei", "Helvetica Neue", Arial, sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      line-height: 1.5;
+    }
+    header {
+      padding: 18px 28px;
+      border-bottom: 1px solid var(--border);
+      background: var(--panel);
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      flex-wrap: wrap;
+      gap: 12px;
+    }
+    header h1 {
+      margin: 0;
+      font-size: 18px;
+      font-weight: 600;
+      letter-spacing: 0.3px;
+    }
+    header h1 .accent { color: var(--accent); }
+    #server-status {
+      font-size: 12px;
+      color: var(--text-dim);
+      padding: 4px 10px;
+      border: 1px solid var(--border);
+      border-radius: 999px;
+      background: var(--panel-2);
+    }
+    #server-status.ok    { color: var(--ok);   border-color: var(--ok); }
+    #server-status.warn  { color: var(--warn); border-color: var(--warn); }
+    #server-status.err   { color: var(--err);  border-color: var(--err); }
+
+    main {
+      max-width: 1200px;
+      margin: 0 auto;
+      padding: 24px;
+      display: grid;
+      gap: 18px;
+      grid-template-columns: 1fr;
+    }
+    section {
+      background: var(--panel);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 18px 22px;
+    }
+    section h2 {
+      margin: 0 0 14px 0;
+      font-size: 14px;
+      font-weight: 600;
+      color: var(--text-dim);
+      text-transform: uppercase;
+      letter-spacing: 0.8px;
+    }
+
+    /* form */
+    .form-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 14px;
+    }
+    .form-row { display: flex; flex-direction: column; gap: 6px; }
+    .form-row.full { grid-column: 1 / -1; }
+    label {
+      font-size: 12px;
+      color: var(--text-dim);
+      font-weight: 500;
+    }
+    label .hint { color: var(--text-dim); opacity: 0.6; font-weight: 400; }
+    input[type="file"], input[type="number"], select {
+      width: 100%;
+      background: var(--panel-2);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 9px 12px;
+      color: var(--text);
+      font-size: 13px;
+      font-family: inherit;
+      outline: none;
+    }
+    input[type="file"]:focus, input[type="number"]:focus, select:focus {
+      border-color: var(--accent);
+    }
+    .checkbox-row {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px 14px;
+      margin-top: 4px;
+    }
+    .checkbox-row label {
+      display: inline-flex;
+      align-items: center;
+      gap: 5px;
+      cursor: pointer;
+      color: var(--text);
+      font-size: 13px;
+    }
+    .checkbox-row input { accent-color: var(--accent); }
+
+    button {
+      background: var(--accent);
+      color: white;
+      border: 0;
+      padding: 10px 22px;
+      border-radius: 8px;
+      font-size: 13px;
+      font-weight: 600;
+      cursor: pointer;
+      transition: background 0.15s;
+    }
+    button:hover:not(:disabled) { background: var(--accent-2); }
+    button:disabled { background: #444c5a; cursor: not-allowed; }
+    button.secondary {
+      background: transparent;
+      color: var(--accent);
+      border: 1px solid var(--accent);
+      padding: 5px 11px;
+      font-size: 12px;
+    }
+    button.secondary:hover:not(:disabled) {
+      background: rgba(91, 156, 255, 0.1);
+    }
+
+    /* progress / status */
+    #status-bar {
+      display: none;
+      align-items: center;
+      gap: 10px;
+      padding: 10px 14px;
+      background: var(--panel-2);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      font-size: 13px;
+      color: var(--text-dim);
+    }
+    #status-bar.show { display: flex; }
+    .spinner {
+      width: 14px;
+      height: 14px;
+      border: 2px solid var(--border);
+      border-top-color: var(--accent);
+      border-radius: 50%;
+      animation: spin 0.8s linear infinite;
+    }
+    @keyframes spin { to { transform: rotate(360deg); } }
+
+    /* result */
+    #result { display: none; }
+    #result.show { display: block; }
+    .stats {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+      gap: 10px;
+      margin-bottom: 16px;
+    }
+    .stat {
+      background: var(--panel-2);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 10px 14px;
+    }
+    .stat .label {
+      font-size: 11px;
+      color: var(--text-dim);
+      text-transform: uppercase;
+      letter-spacing: 0.6px;
+    }
+    .stat .value {
+      font-size: 18px;
+      font-weight: 600;
+      margin-top: 2px;
+    }
+
+    textarea {
+      width: 100%;
+      min-height: 100px;
+      background: var(--panel-2);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      color: var(--text);
+      padding: 12px;
+      font-family: ui-monospace, "SF Mono", Consolas, monospace;
+      font-size: 13px;
+      line-height: 1.6;
+      resize: vertical;
+    }
+    textarea:focus { outline: none; border-color: var(--accent); }
+
+    .segments {
+      max-height: 380px;
+      overflow-y: auto;
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      background: var(--panel-2);
+    }
+    .segments table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 13px;
+    }
+    .segments th, .segments td {
+      text-align: left;
+      padding: 8px 12px;
+      border-bottom: 1px solid var(--border);
+    }
+    .segments th {
+      position: sticky;
+      top: 0;
+      background: var(--panel);
+      color: var(--text-dim);
+      font-weight: 600;
+      font-size: 11px;
+      text-transform: uppercase;
+      letter-spacing: 0.6px;
+    }
+    .segments tr:last-child td { border-bottom: 0; }
+    .segments td.text { color: var(--text); }
+    .segments td.time { color: var(--text-dim); white-space: nowrap; font-variant-numeric: tabular-nums; }
+    .spk-tag {
+      display: inline-block;
+      padding: 1px 8px;
+      border-radius: 999px;
+      font-size: 11px;
+      font-weight: 600;
+    }
+    .spk-tag[data-s="0"] { background: rgba(96, 165, 250, 0.18); color: var(--spk1); }
+    .spk-tag[data-s="1"] { background: rgba(251, 146, 60, 0.18); color: var(--spk2); }
+    .spk-tag[data-s="2"] { background: rgba(167, 139, 250, 0.18); color: var(--spk3); }
+    .spk-tag[data-s="3"] { background: rgba(52, 211, 153, 0.18); color: var(--spk4); }
+    .spk-tag.unknown    { background: rgba(154, 163, 178, 0.18); color: var(--text-dim); }
+
+    .download-row {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      margin-top: 10px;
+    }
+    .download-row .pill {
+      background: var(--panel-2);
+      border: 1px solid var(--border);
+      border-radius: 999px;
+      padding: 5px 12px;
+      font-size: 12px;
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+    }
+    .download-row .pill button {
+      padding: 2px 8px;
+      font-size: 11px;
+    }
+
+    footer {
+      padding: 20px;
+      text-align: center;
+      color: var(--text-dim);
+      font-size: 12px;
+    }
+    footer code {
+      background: var(--panel-2);
+      padding: 2px 6px;
+      border-radius: 4px;
+    }
+
+    @media (max-width: 720px) {
+      .form-grid { grid-template-columns: 1fr; }
+      main { padding: 16px; }
+    }
+  </style>
+</head>
+<body>
+  <header>
+    <h1><span class="accent">paraformer-asr</span> · 语音识别 Web UI</h1>
+    <span id="server-status">检查中…</span>
+  </header>
+
+  <main>
+    <section>
+      <h2>1. 上传与选项</h2>
+      <form id="upload-form">
+        <div class="form-grid">
+          <div class="form-row full">
+            <label>音频文件 <span class="hint">（wav / flac 免依赖；其他格式需 ffmpeg）</span></label>
+            <input type="file" id="audio-file" accept="audio/*" required>
+          </div>
+
+          <div class="form-row">
+            <label>模型</label>
+            <select id="model-select"></select>
+          </div>
+
+          <div class="form-row" id="spk-num-row">
+            <label>说话人数 <span class="hint">（留空 = 自动检测；模型无 spk 时禁用）</span></label>
+            <input type="number" id="spk-num" min="1" max="20" placeholder="自动">
+          </div>
+
+          <div class="form-row">
+            <label>输出格式 <span class="hint">（多选）</span></label>
+            <div class="checkbox-row">
+              <label><input type="checkbox" name="fmt" value="srt" checked>SRT</label>
+              <label><input type="checkbox" name="fmt" value="vtt" checked>VTT</label>
+              <label><input type="checkbox" name="fmt" value="txt">TXT</label>
+              <label><input type="checkbox" name="fmt" value="md">MD</label>
+              <label><input type="checkbox" name="fmt" value="lrc">LRC</label>
+              <label><input type="checkbox" name="fmt" value="json">JSON</label>
+            </div>
+          </div>
+
+          <div class="form-row full">
+            <button type="submit" id="submit-btn">开始识别</button>
+          </div>
+        </div>
+      </form>
+
+      <div id="status-bar">
+        <div class="spinner"></div>
+        <span id="status-text">上传并识别中…</span>
+      </div>
+    </section>
+
+    <section id="result">
+      <h2>2. 识别结果</h2>
+
+      <div class="stats">
+        <div class="stat"><div class="label">模型</div><div class="value" id="stat-model">—</div></div>
+        <div class="stat"><div class="label">说话人数</div><div class="value" id="stat-spk">—</div></div>
+        <div class="stat"><div class="label">段数</div><div class="value" id="stat-segs">—</div></div>
+        <div class="stat"><div class="label">文本长度</div><div class="value" id="stat-chars">—</div></div>
+      </div>
+
+      <label style="margin-top: 8px;">完整文本</label>
+      <textarea id="full-text" readonly></textarea>
+
+      <label style="margin-top: 16px; display: block;">分段（最多展示 50 段）</label>
+      <div class="segments">
+        <table>
+          <thead>
+            <tr><th>开始</th><th>结束</th><th>说话人</th><th>内容</th></tr>
+          </thead>
+          <tbody id="segments-tbody"></tbody>
+        </table>
+      </div>
+
+      <label style="margin-top: 16px; display: block;">下载</label>
+      <div class="download-row" id="download-row"></div>
+    </section>
+  </main>
+
+  <footer>
+    <code>POST /transcribe</code> &nbsp;·&nbsp; <code>GET /models</code> &nbsp;·&nbsp; <code>GET /health</code> &nbsp;·&nbsp; paraformer-asr v0.2.0
+  </footer>
+
+<script>
+const $ = (sel) => document.querySelector(sel);
+const $$ = (sel) => document.querySelectorAll(sel);
+
+const statusEl    = $('#server-status');
+const modelSelect = $('#model-select');
+const spkNumInput = $('#spk-num');
+const spkNumRow   = $('#spk-num-row');
+const form        = $('#upload-form');
+const submitBtn   = $('#submit-btn');
+const fileInput   = $('#audio-file');
+const statusBar   = $('#status-bar');
+const statusText  = $('#status-text');
+const resultEl    = $('#result');
+
+// 下载用的内存缓存
+let lastResult = null;
+let lastFileBase = 'transcript';
+
+async function checkHealth() {
+  try {
+    const r = await fetch('/health');
+    const h = await r.json();
+    statusEl.textContent = `就绪 · ${h.default_model} · ffmpeg=${h.ffmpeg_available}`;
+    statusEl.className = h.ffmpeg_available ? 'warn' : 'ok';
+    statusEl.title = `原生格式: ${(h.native_formats || []).join(', ')}`;
+  } catch (e) {
+    statusEl.textContent = '无法连接服务器';
+    statusEl.className = 'err';
+  }
+}
+
+async function loadModels() {
+  try {
+    const r = await fetch('/models');
+    const m = await r.json();
+    modelSelect.innerHTML = '';
+    for (const spec of m.models) {
+      const opt = document.createElement('option');
+      opt.value = spec.name;
+      opt.textContent = spec.name + (spec.name === m.default ? ' (默认)' : '');
+      opt.dataset.hasSpk = spec.has_spk;
+      opt.dataset.streaming = spec.features.streaming || false;
+      opt.dataset.multilingual = spec.features.multilingual || false;
+      modelSelect.appendChild(opt);
+    }
+    modelSelect.value = m.default;
+    onModelChange();
+  } catch (e) {
+    statusEl.textContent = '加载模型失败: ' + e.message;
+    statusEl.className = 'err';
+  }
+}
+
+function onModelChange() {
+  const opt = modelSelect.selectedOptions[0];
+  if (!opt) return;
+  const hasSpk = opt.dataset.hasSpk === 'true';
+  const streaming = opt.dataset.streaming === 'true';
+  spkNumInput.disabled = !hasSpk || streaming;
+  spkNumInput.value = '';
+  spkNumInput.placeholder = hasSpk ? '自动' : '该模型不支持';
+}
+
+function fmtTime(sec) {
+  if (sec == null) return '—';
+  const m = Math.floor(sec / 60);
+  const s = (sec - m * 60);
+  return `${m}:${s.toFixed(2).padStart(5, '0')}`;
+}
+
+function renderResult(data, fileBase) {
+  lastResult = data;
+  lastFileBase = fileBase;
+
+  $('#stat-model').textContent = data.model || '—';
+  $('#stat-spk').textContent   = data.num_speakers ?? '未知';
+  $('#stat-segs').textContent  = data.segments ? data.segments.length : 0;
+  $('#stat-chars').textContent = data.text ? data.text.length : 0;
+  $('#full-text').value = data.text || '';
+
+  // 段表
+  const tbody = $('#segments-tbody');
+  tbody.innerHTML = '';
+  const segs = data.segments || [];
+  const show = segs.slice(0, 50);
+  for (const s of show) {
+    const tr = document.createElement('tr');
+    const spk = s.spk;
+    const spkCell = spk == null
+      ? '<span class="spk-tag unknown">—</span>'
+      : `<span class="spk-tag" data-s="${spk}">spk${spk}</span>`;
+    tr.innerHTML = `
+      <td class="time">${fmtTime(s.start)}</td>
+      <td class="time">${fmtTime(s.end)}</td>
+      <td>${spkCell}</td>
+      <td class="text"></td>`;
+    tr.querySelector('td.text').textContent = s.text || '';
+    tbody.appendChild(tr);
+  }
+
+  // 下载
+  const dlRow = $('#download-row');
+  dlRow.innerHTML = '';
+  const fmts = ['srt', 'vtt', 'lrc', 'txt', 'md', 'json'];
+  const available = fmts.filter(f => data[f] && data[f].length > 0);
+  if (available.length === 0) {
+    dlRow.innerHTML = '<span class="hint" style="color: var(--text-dim); font-size: 12px;">未勾选格式；如需下载请重新勾选后提交</span>';
+  } else {
+    for (const f of available) {
+      const pill = document.createElement('span');
+      pill.className = 'pill';
+      pill.innerHTML = `<strong>${f.toUpperCase()}</strong> <span style="color: var(--text-dim);">${(data[f].length/1024).toFixed(1)}KB</span>`;
+      const btn = document.createElement('button');
+      btn.className = 'secondary';
+      btn.textContent = '下载';
+      btn.onclick = () => download(f, data[f]);
+      pill.appendChild(btn);
+      dlRow.appendChild(pill);
+    }
+  }
+
+  resultEl.classList.add('show');
+}
+
+function download(fmt, content) {
+  const blob = new Blob([content], { type: 'text/plain;charset=utf-8' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = `${lastFileBase}.${fmt}`;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
+
+form.addEventListener('submit', async (ev) => {
+  ev.preventDefault();
+  const file = fileInput.files[0];
+  if (!file) return;
+
+  const fmts = [...$$('input[name="fmt"]:checked')].map(c => c.value);
+  if (fmts.length === 0) {
+    alert('请至少勾选一个输出格式');
+    return;
+  }
+
+  const model = modelSelect.value;
+  const spkNumVal = spkNumInput.value;
+
+  const fd = new FormData();
+  fd.append('audio', file);
+  fd.append('model', model);
+  fd.append('formats', fmts.join(','));
+  if (spkNumVal) fd.append('preset_spk_num', spkNumVal);
+
+  submitBtn.disabled = true;
+  statusBar.classList.add('show');
+  statusText.textContent = `上传 ${file.name} (${(file.size/1024/1024).toFixed(2)}MB) 并识别中…`;
+  resultEl.classList.remove('show');
+
+  const t0 = Date.now();
+  try {
+    const r = await fetch('/transcribe', { method: 'POST', body: fd });
+    const dt = ((Date.now() - t0) / 1000).toFixed(1);
+
+    if (!r.ok) {
+      const err = await r.json().catch(() => ({ detail: r.statusText }));
+      throw new Error(`[${r.status}] ${err.detail || 'request failed'}`);
+    }
+    const data = await r.json();
+    const base = file.name.replace(/\.[^.]+$/, '') || 'transcript';
+    statusText.textContent = `✓ 完成 ${dt}s · ${data.segments?.length || 0} 段 · ${data.num_speakers ?? '?'} 说话人`;
+    setTimeout(() => statusBar.classList.remove('show'), 2500);
+    renderResult(data, base);
+  } catch (e) {
+    statusText.textContent = `✗ ${e.message}`;
+    setTimeout(() => statusBar.classList.remove('show'), 8000);
+  } finally {
+    submitBtn.disabled = false;
+  }
+});
+
+modelSelect.addEventListener('change', onModelChange);
+
+(async () => {
+  await checkHealth();
+  await loadModels();
+})();
+</script>
+</body>
+</html>
