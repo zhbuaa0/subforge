@@ -32,6 +32,7 @@ from fastapi.responses import FileResponse, JSONResponse
 
 from . import audio as audio_utils
 from . import exporters
+from . import polish as polish_mod
 from .config import load_registry
 from .models import ModelRegistry
 from .streaming import StreamingSession
@@ -98,6 +99,25 @@ async def web_ui() -> FileResponse:
 async def list_models() -> dict[str, Any]:
     specs: dict = app.state.specs
     default: str = app.state.default
+
+    # polish providers
+    try:
+        p_providers, p_default = polish_mod.load_polish_config()
+        polish_info = {
+            "default": p_default,
+            "providers": [
+                {
+                    "name": n,
+                    "model": p.model,
+                    "available": polish_mod.is_provider_available(p),
+                    "api_key_env": p.api_key_env,
+                }
+                for n, p in p_providers.items()
+            ],
+        }
+    except Exception as e:
+        polish_info = {"error": str(e)}
+
     return {
         "default": default,
         "ffmpeg_available": audio_utils.check_ffmpeg(),
@@ -113,6 +133,7 @@ async def list_models() -> dict[str, Any]:
             }
             for name, spec in specs.items()
         ],
+        "polish": polish_info,
     }
 
 
@@ -123,6 +144,7 @@ async def transcribe(
     formats: str | None = Form(None, description="可选：逗号分隔的内嵌格式，如 srt,vtt,txt"),
     preset_spk_num: int | None = Form(None, description="强制说话人数（仅支持 spk 的模型）"),
     language: str | None = Form(None, description="语言（多语种模型）"),
+    polish: str | None = Form(None, description="可选：polish provider 名（minimax/deepseek/openai）"),
 ) -> JSONResponse:
     name = model or app.state.default
     specs = app.state.specs
@@ -184,6 +206,35 @@ async def transcribe(
             if fmt not in exporters.available_formats():
                 raise HTTPException(400, f"unknown format '{fmt}'; available: {exporters.available_formats()}")
             response[fmt] = exporters.render(r, fmt)
+
+        # 可选：AI 润色（用 LLM 轻度清理 segment.text）
+        if polish:
+            providers, default_name = polish_mod.load_polish_config()
+            pname = polish.strip()
+            if pname not in providers:
+                raise HTTPException(400, f"unknown polish provider '{pname}'; available: {list(providers)}")
+            pspec = providers[pname]
+            if not polish_mod.is_provider_available(pspec):
+                raise HTTPException(
+                    503,
+                    f"polish provider '{pname}' unavailable: env {pspec.api_key_env} not set on server",
+                )
+            try:
+                polished = await asyncio.to_thread(polish_mod.polish_transcript, r, pspec)
+            except Exception as e:
+                raise HTTPException(500, f"polish failed: {e}") from e
+            response["polished"] = {
+                "provider": pname,
+                "model": pspec.model,
+                "text": polished.text,
+                "segments": [
+                    {"start": s.start, "end": s.end, "text": s.text, "spk": s.spk}
+                    for s in polished.segments
+                ],
+            }
+            # 同时也以 polished.<fmt> 输出
+            for fmt in requested:
+                response[f"polished_{fmt}"] = exporters.render(polished, fmt)
 
         return JSONResponse(response)
     finally:

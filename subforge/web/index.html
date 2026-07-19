@@ -337,6 +337,13 @@
           </div>
 
           <div class="form-row full">
+            <label style="display: flex; align-items: center; gap: 8px; cursor: pointer;">
+              <input type="checkbox" id="use-polish" style="width: auto; margin: 0;">
+              <span>🤖 AI 润色 <span class="hint" id="polish-hint">（轻度清理：删口头禅/修错字/统一标点）</span></span>
+            </label>
+          </div>
+
+          <div class="form-row full">
             <button type="submit" id="submit-btn">开始识别</button>
           </div>
         </div>
@@ -374,6 +381,23 @@
       <label style="margin-top: 16px; display: block;">下载</label>
       <div class="download-row" id="download-row"></div>
     </section>
+
+    <section id="result-polished" style="display: none; border-color: rgba(91,156,255,0.4);">
+      <h2 style="color: var(--accent);">🤖 3. AI 润色版本</h2>
+      <div id="polished-meta" style="font-size: 12px; color: var(--text-dim); margin-bottom: 14px;"></div>
+
+      <div class="stats">
+        <div class="stat"><div class="label">润色 provider</div><div class="value" id="pstat-provider">—</div></div>
+        <div class="stat"><div class="label">模型</div><div class="value" id="pstat-model">—</div></div>
+        <div class="stat"><div class="label">原文 → 润色</div><div class="value" id="pstat-chars">—</div></div>
+      </div>
+
+      <label>润色后文本</label>
+      <textarea id="polished-text" readonly></textarea>
+
+      <label style="margin-top: 16px; display: block;">下载（polished.*）</label>
+      <div class="download-row" id="polished-download-row"></div>
+    </section>
   </main>
 
   <footer>
@@ -394,10 +418,15 @@ const fileInput   = $('#audio-file');
 const statusBar   = $('#status-bar');
 const statusText  = $('#status-text');
 const resultEl    = $('#result');
+const usePolishCb = $('#use-polish');
+const polishHint  = $('#polish-hint');
 
 // 下载用的内存缓存
 let lastResult = null;
+let lastPolished = null;
 let lastFileBase = 'transcript';
+let polishAvailable = false;
+let polishDefaultName = null;
 
 async function checkHealth() {
   try {
@@ -428,6 +457,23 @@ async function loadModels() {
     }
     modelSelect.value = m.default;
     onModelChange();
+
+    // polish providers
+    const p = m.polish;
+    if (p && p.providers) {
+      const avail = p.providers.filter(x => x.available);
+      polishAvailable = avail.length > 0;
+      polishDefaultName = p.default;
+      if (!polishAvailable) {
+        polishHint.innerHTML = '（⚠️ 服务端未配置任何 provider；管理员需设置 '
+          + p.providers.map(x => x.api_key_env).join(' / ') + '）';
+        usePolishCb.disabled = true;
+        usePolishCb.checked = false;
+      } else {
+        const names = avail.map(x => `${x.name}（${x.model}）`).join(' · ');
+        polishHint.textContent = `（provider：${names}）`;
+      }
+    }
   } catch (e) {
     statusEl.textContent = '加载模型失败: ' + e.message;
     statusEl.className = 'err';
@@ -517,6 +563,52 @@ function download(fmt, content) {
   setTimeout(() => URL.revokeObjectURL(url), 1000);
 }
 
+function renderPolished(data, fileBase) {
+  lastPolished = data.polished;
+  $('#pstat-provider').textContent = data.polished.provider || '—';
+  $('#pstat-model').textContent = data.polished.model || '—';
+  const origLen = (data.text || '').length;
+  const polLen = (data.polished.text || '').length;
+  const diff = polLen - origLen;
+  const diffStr = diff >= 0 ? `+${diff}` : `${diff}`;
+  $('#pstat-chars').textContent = `${origLen} → ${polLen} (${diffStr})`;
+  $('#polished-text').value = data.polished.text || '';
+
+  // 下载（polished_srt / polished_vtt / polished_txt 等）
+  const dlRow = $('#polished-download-row');
+  dlRow.innerHTML = '';
+  const fmts = ['srt', 'vtt', 'txt', 'md', 'lrc', 'json'];
+  let count = 0;
+  for (const f of fmts) {
+    const k = `polished_${f}`;
+    if (data[k] && data[k].length > 0) {
+      const pill = document.createElement('span');
+      pill.className = 'pill';
+      pill.innerHTML = `<strong>${f.toUpperCase()}</strong> <span style="color: var(--text-dim);">${(data[k].length/1024).toFixed(1)}KB</span>`;
+      const btn = document.createElement('button');
+      btn.className = 'secondary';
+      btn.textContent = '下载';
+      btn.onclick = () => {
+        const blob = new Blob([data[k]], { type: 'text/plain;charset=utf-8' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `${fileBase}.polished.${f}`;
+        document.body.appendChild(a); a.click(); document.body.removeChild(a);
+        setTimeout(() => URL.revokeObjectURL(url), 1000);
+      };
+      pill.appendChild(btn);
+      dlRow.appendChild(pill);
+      count++;
+    }
+  }
+  if (count === 0) {
+    dlRow.innerHTML = '<span style="color: var(--text-dim); font-size: 12px;">未生成（需先勾选输出格式）</span>';
+  }
+
+  $('#result-polished').style.display = 'block';
+}
+
 form.addEventListener('submit', async (ev) => {
   ev.preventDefault();
   const file = fileInput.files[0];
@@ -530,17 +622,22 @@ form.addEventListener('submit', async (ev) => {
 
   const model = modelSelect.value;
   const spkNumVal = spkNumInput.value;
+  const usePolish = usePolishCb.checked && polishAvailable;
 
   const fd = new FormData();
   fd.append('audio', file);
   fd.append('model', model);
   fd.append('formats', fmts.join(','));
   if (spkNumVal) fd.append('preset_spk_num', spkNumVal);
+  if (usePolish) fd.append('polish', polishDefaultName);
 
   submitBtn.disabled = true;
   statusBar.classList.add('show');
-  statusText.textContent = `上传 ${file.name} (${(file.size/1024/1024).toFixed(2)}MB) 并识别中…`;
+  statusText.textContent = usePolish
+    ? `上传 ${file.name} (${(file.size/1024/1024).toFixed(2)}MB) 并识别 + AI 润色…`
+    : `上传 ${file.name} (${(file.size/1024/1024).toFixed(2)}MB) 并识别中…`;
   resultEl.classList.remove('show');
+  $('#result-polished').style.display = 'none';
 
   const t0 = Date.now();
   try {
@@ -553,9 +650,12 @@ form.addEventListener('submit', async (ev) => {
     }
     const data = await r.json();
     const base = file.name.replace(/\.[^.]+$/, '') || 'transcript';
-    statusText.textContent = `✓ 完成 ${dt}s · ${data.segments?.length || 0} 段 · ${data.num_speakers ?? '?'} 说话人`;
+    statusText.textContent = `✓ 完成 ${dt}s · ${data.segments?.length || 0} 段 · ${data.num_speakers ?? '?'} 说话人${data.polished ? ' · ✨ 已润色' : ''}`;
     setTimeout(() => statusBar.classList.remove('show'), 2500);
     renderResult(data, base);
+    if (data.polished) {
+      renderPolished(data, base);
+    }
   } catch (e) {
     statusText.textContent = `✗ ${e.message}`;
     setTimeout(() => statusBar.classList.remove('show'), 8000);

@@ -114,6 +114,27 @@ def cmd_transcribe(args: argparse.Namespace) -> int:
     )
     _log(f"inference done in {time.time() - t0:.1f}s")
 
+    # 可选：AI 润色
+    if args.polish:
+        from . import polish as polish_mod
+        providers, default_provider = polish_mod.load_polish_config(args.config)
+        provider_name = args.polish
+        if provider_name not in providers:
+            print(f"[ERR] 未知 polish provider '{provider_name}'；可选：{list(providers)}", file=sys.stderr)
+            return 2
+        spec = providers[provider_name]
+        if not polish_mod.is_provider_available(spec):
+            print(
+                f"[ERR] provider '{provider_name}' 不可用：环境变量 {spec.api_key_env} 未设置\n"
+                f"      PowerShell：$env:{spec.api_key_env} = \"sk-...\"",
+                file=sys.stderr,
+            )
+            return 2
+        _log(f"polishing with provider '{provider_name}' (model={spec.model})")
+        t0 = time.time()
+        results = [polish_mod.polish_transcript(r, spec=spec) for r in results]
+        _log(f"polish done in {time.time() - t0:.1f}s")
+
     out_dir = Path(args.output_dir) if args.output_dir else None
     if out_dir:
         out_dir.mkdir(parents=True, exist_ok=True)
@@ -205,6 +226,50 @@ def cmd_server(args: argparse.Namespace) -> int:
     ])
 
 
+def cmd_polish(args: argparse.Namespace) -> int:
+    """对已保存的 funasr JSON 做 AI 润色，导出多种格式。"""
+    import json
+    from . import exporters, polish as polish_mod
+    from .transcriber import from_raw_dict
+
+    src = Path(args.result_json)
+    if not src.exists():
+        print(f"[ERR] not found: {src}", file=sys.stderr)
+        return 2
+
+    raw = json.loads(src.read_text(encoding="utf-8"))
+    r = from_raw_dict(raw)
+    _log(f"loaded {src.name}: {len(r.segments)} segments, {len(r.text)} chars")
+
+    providers, default_name = polish_mod.load_polish_config(args.config)
+    provider_name = args.provider or default_name
+    if provider_name not in providers:
+        print(f"[ERR] 未知 polish provider '{provider_name}'；可选：{list(providers)}", file=sys.stderr)
+        return 2
+    spec = providers[provider_name]
+    if not polish_mod.is_provider_available(spec):
+        print(
+            f"[ERR] provider '{provider_name}' 不可用：环境变量 {spec.api_key_env} 未设置",
+            file=sys.stderr,
+        )
+        return 2
+
+    _log(f"polishing with '{provider_name}' (model={spec.model})")
+    t0 = time.time()
+    polished = polish_mod.polish_transcript(r, spec=spec)
+    _log(f"polish done in {time.time() - t0:.1f}s, text {len(r.text)} -> {len(polished.text)} chars")
+
+    formats = [f.strip().lower() for f in (args.format or "").split(",") if f.strip()]
+    if not formats:
+        formats = ["txt", "srt", "vtt"]
+    out_dir = Path(args.output_dir) if args.output_dir else src.parent
+    out_dir.mkdir(parents=True, exist_ok=True)
+    for fmt in formats:
+        p = exporters.export(polished, fmt, out_dir / f"{src.stem}.polished.{fmt}")
+        _log(f"wrote {p}")
+    return 0
+
+
 # ---------- argparse ----------
 
 def _build_parser() -> argparse.ArgumentParser:
@@ -245,6 +310,11 @@ def _build_parser() -> argparse.ArgumentParser:
         "--batch-size-s", type=int, default=None,
         help="动态 batch 时长阈值（秒），覆盖模型默认值",
     )
+    p_tr.add_argument(
+        "--polish",
+        metavar="PROVIDER",
+        help="用 LLM provider（minimax/deepseek/openai）做轻度清理；需设置对应 API key 环境变量",
+    )
     p_tr.set_defaults(func=cmd_transcribe)
 
     p_ex = sub.add_parser("export", help="从已保存 JSON 重新导出其他格式")
@@ -260,6 +330,22 @@ def _build_parser() -> argparse.ArgumentParser:
         "--output-dir", help="目录输出（多格式时用此）；默认与输入 JSON 同目录",
     )
     p_ex.set_defaults(func=cmd_export)
+
+    p_po = sub.add_parser("polish", help="对已保存的 funasr JSON 做 AI 润色")
+    p_po.add_argument("result_json", help="funasr 原始 JSON 结果文件")
+    p_po.add_argument(
+        "--provider", "-p",
+        help="polish provider 名（默认：models.yaml 的 ai_polish.default）",
+    )
+    p_po.add_argument(
+        "--format", "-f",
+        help="导出格式（逗号分隔）：srt,vtt,txt,md；默认 srt,vtt,txt",
+    )
+    p_po.add_argument(
+        "--output-dir", "-o",
+        help="输出目录（默认与输入 JSON 同目录）",
+    )
+    p_po.set_defaults(func=cmd_polish)
 
     p_sv = sub.add_parser("server", help="启动 HTTP+WebSocket 服务")
     p_sv.add_argument("--host", default="127.0.0.1")

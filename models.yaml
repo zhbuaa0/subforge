@@ -31,6 +31,22 @@ models:
       multilingual: false
       streaming: false
 
+  seaco-paraformer-zh:                   # 多说话人重叠语音（访谈/会议/争吵）专用
+    model: iic/speech_seaco_paraformer_large_asr_nat-zh-cn-16k-common-vocab8404-pytorch
+    vad_model: iic/speech_fsmn_vad_zh-cn-16k-common-pytorch
+    punc_model: iic/punc_ct-transformer_zh-cn-common-vocab272727-pytorch
+    init:
+      disable_update: true
+    generate:
+      batch_size_s: 300
+    features:
+      timestamps: true
+      speakers: false  # SeACo 内部已处理多说话人，spk 字段可能空/不准确
+      punc: true
+      multilingual: false
+      streaming: false
+      best_for: overlapped_speech
+
   sensevoice:
     model: iic/SenseVoiceSmall
     init:
@@ -62,3 +78,45 @@ models:
       punc: true
       multilingual: false
       streaming: true
+
+# ---------- AI 润色 ----------
+# 通过 OpenAI 兼容 Chat Completions 接口调用 LLM，对 ASR 输出做"轻度清理"：
+# 删口头禅、修错字、统一标点。保留时间戳和说话人标签。
+# API key 通过环境变量注入，**不入 git**。
+#
+# 用法：
+#   $env:MINIMAX_API_KEY = "sk-..."        # PowerShell 临时
+#   asr transcribe C3142.wav --polish minimax --format srt,txt
+#
+# 切换 provider：
+#   asr transcribe ... --polish deepseek --format srt
+#
+# 自定义 provider：复制下面 minimax 条目，改 name / base_url / model / api_key_env 即可。
+ai_polish:
+  default: minimax
+
+  providers:
+    minimax:                              # 默认：MiniMax（OpenAI 兼容协议）
+      api_key_env: MINIMAX_API_KEY        # 设置 $env:MINIMAX_API_KEY
+      base_url: https://api.minimaxi.com/v1
+      model: MiniMax-M3
+      temperature: 0.2
+      max_tokens: 4096
+      batch_size: 20                       # 一次 API 调用合并多少段
+      timeout: 60
+
+    deepseek:                             # DeepSeek（中文好、超便宜）
+      api_key_env: DEEPSEEK_API_KEY
+      base_url: https://api.deepseek.com/v1
+      model: deepseek-chat
+      temperature: 0.2
+      max_tokens: 4096
+      batch_size: 20
+
+    openai:                               # OpenAI（国际通用）
+      api_key_env: OPENAI_API_KEY
+      base_url: https://api.openai.com/v1
+      model: gpt-4o-mini
+      temperature: 0.2
+      max_tokens: 4096
+      batch_size: 20
