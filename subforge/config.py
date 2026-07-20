@@ -28,6 +28,7 @@ class ModelSpec:
 
     name: str
     model: str
+    backend: str = "funasr"  # "funasr" (default) or "moss"
     vad_model: str | None = None
     punc_model: str | None = None
     spk_model: str | None = None
@@ -72,14 +73,22 @@ def _coerce_spec(name: str, raw: dict[str, Any]) -> ModelSpec:
     if "model" not in raw:
         raise ValueError(f"model '{name}': 缺少必填字段 'model'")
 
+    backend = str(raw.get("backend", "funasr"))
+    if backend not in {"funasr", "moss"}:
+        raise ValueError(
+            f"model '{name}': backend='{backend}' 不支持；可选：funasr, moss"
+        )
+
     streaming = bool(raw.get("streaming", False))
     features = dict(raw.get("features") or {})
     # streaming 字段自动同步到 features，features 里再覆盖
     features.setdefault("streaming", streaming)
+    features.setdefault("backend", backend)
 
     return ModelSpec(
         name=name,
         model=str(raw["model"]),
+        backend=backend,
         vad_model=raw.get("vad_model"),
         punc_model=raw.get("punc_model"),
         spk_model=raw.get("spk_model"),

@@ -79,6 +79,24 @@ models:
       multilingual: false
       streaming: true
 
+  moss-transcribe-diarize:                # MOSS-Transcribe-Diarize 0.9B (HF transformers backend)
+    backend: moss
+    model: OpenMOSS-Team/MOSS-Transcribe-Diarize
+    init:
+      trust_remote_code: true
+      dtype: bfloat16
+      device_map: cuda:0
+    generate:
+      max_new_tokens: 65536
+      do_sample: false
+    features:
+      timestamps: true
+      speakers: true
+      punc: true
+      multilingual: true    # 50+ languages
+      streaming: false      # MOSS 未提供流式推理
+      best_for: long_form_meetings_and_podcasts
+
 # ---------- AI 润色 ----------
 # 通过 OpenAI 兼容 Chat Completions 接口调用 LLM，对 ASR 输出做"轻度清理"：
 # 删口头禅、修错字、统一标点。保留时间戳和说话人标签。

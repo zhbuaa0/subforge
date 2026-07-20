@@ -125,6 +125,7 @@ async def list_models() -> dict[str, Any]:
             {
                 "name": name,
                 "model_id": spec.model,
+                "backend": spec.backend,
                 "has_vad": spec.has_vad,
                 "has_punc": spec.has_punc,
                 "has_spk": spec.has_spk,

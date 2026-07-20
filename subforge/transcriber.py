@@ -1,10 +1,14 @@
-"""Transcriber —— 把 funasr.AutoModel.generate() 的原始结果归一化为稳定的 TranscriptResult。
+"""Transcriber —— backend-agnostic 封装，委托给 BaseBackend 跑推理并归一化结果。
 
-归一化要点：
+归一化要点（仍由 FunasrBackend 负责，因为 funasr 内部约定的字段名 / 毫秒时间戳
+不在 MOSS 输出中存在）：
     1. `start` / `end` 统一从毫秒（funasr 内部约定）转为秒
     2. `spk` 缺失时为 None（SenseVoice / 无 spk_model 的情况）
     3. 顶层 `timestamp` 字段原样保留（如有），供高级用户使用
     4. SenseVoice 的 `<|zh|>` `<|EMO|>` 等标签通过 `rich_transcription_postprocess` 剥离
+
+MOSS 后端的归一化在 ``subforge/backends/moss_backend.py`` 内完成（speaker 字符串
+→ int、构造 ``TranscriptResult``），共用本文件的 ``Segment`` / ``TranscriptResult`` 契约。
 """
 
 from __future__ import annotations
@@ -130,13 +134,13 @@ def _apply_postprocess(results: list[TranscriptResult], spec: ModelSpec) -> None
 # ---------- 主类 ----------
 
 class Transcriber:
-    """围绕一个已加载的 AutoModel 实例 + ModelSpec 的封装。
+    """围绕一个已加载的 BaseBackend + ModelSpec 的封装（backend-agnostic）。
 
-    一般不需要直接构造：见 `models.ModelRegistry` 与后续阶段的 `cli.transcribe`。
+    一般不需要直接构造：见 `models.ModelRegistry` 与 `cli.transcribe`。
     """
 
-    def __init__(self, model: Any, spec: ModelSpec):
-        self.model = model
+    def __init__(self, backend: Any, spec: ModelSpec):
+        self.backend = backend
         self.spec = spec
 
     def transcribe(
@@ -146,27 +150,22 @@ class Transcriber:
         preset_spk_num: int | None = None,
         **generate_overrides: Any,
     ) -> list[TranscriptResult]:
-        """对单个或多个音频做识别。
+        """对单个或多个音频做识别（委托给 backend）。
 
         Args:
-            audio: 单个路径/URL 或可迭代的多个；与 `AutoModel.generate(input=...)` 一致。
-            preset_spk_num: 强制说话人数；None（默认）走 funasr 自动检测。
-            **generate_overrides: 临时覆盖 spec.generate 中的字段（如 batch_size_s, language）。
+            audio: 单个路径/URL 或可迭代的多个；backend 实现自行决定如何处理。
+            preset_spk_num: 强制说话人数；仅 FunasrBackend 使用，MossBackend 忽略。
+            **generate_overrides: 临时覆盖 spec.generate 中的字段。
 
         Returns:
             与输入一一对应的 TranscriptResult 列表。
         """
-        gen_kwargs: dict[str, Any] = dict(self.spec.generate)
-        gen_kwargs.update(generate_overrides)
+        # FunasrBackend 接受 ``preset_spk_num`` 关键字；MossBackend 忽略它
         if preset_spk_num is not None:
-            gen_kwargs["preset_spk_num"] = int(preset_spk_num)
-        # funasr 不接受 preset_spk_num=None；省略即自动检测（关键！）
-
-        raw = self.model.generate(input=audio, **gen_kwargs)
-        results = _normalize(raw or [])
-        if results:
-            _apply_postprocess(results, self.spec)
-        return results
+            return self.backend.transcribe(
+                audio, preset_spk_num=preset_spk_num, **generate_overrides
+            )
+        return self.backend.transcribe(audio, **generate_overrides)
 
 
 # ---------- 工具：从保存的 funasr JSON 还原 TranscriptResult ----------

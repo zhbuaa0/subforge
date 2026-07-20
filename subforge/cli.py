@@ -54,12 +54,13 @@ def cmd_models(args: argparse.Namespace) -> int:
     print(f"Default model: {default}")
     print(f"Config: {Path(args.config).resolve() if args.config else '(default models.yaml)'}")
     print()
-    print(f"{'NAME':<24} {'STREAM':<7} {'SPEAKERS':<9} {'PUNC':<5} {'MULTI':<6} {'MODEL ID'}")
-    print("-" * 110)
+    print(f"{'NAME':<28} {'BACKEND':<8} {'STREAM':<7} {'SPEAKERS':<9} {'PUNC':<5} {'MULTI':<6} {'MODEL ID'}")
+    print("-" * 130)
     for name, spec in specs.items():
         f = spec.features
         print(
-            f"{name:<24} "
+            f"{name:<28} "
+            f"{spec.backend:<8} "
             f"{'yes' if f.get('streaming') else 'no':<7} "
             f"{'yes' if f.get('speakers') else 'no':<9} "
             f"{'yes' if f.get('punc') else 'no':<5} "
@@ -104,6 +105,13 @@ def cmd_transcribe(args: argparse.Namespace) -> int:
             file=sys.stderr,
         )
         return 2
+    # MOSS backend 自动检测说话人数，--spk-num 不适用
+    if args.spk_num is not None and transcriber.spec.backend == "moss":
+        print(
+            f"[ERR] model '{model_name}' (backend=moss) 自动检测说话人数；--spk-num 不适用",
+            file=sys.stderr,
+        )
+        return 2
 
     t0 = time.time()
     results = transcriber.transcribe(
@@ -111,6 +119,7 @@ def cmd_transcribe(args: argparse.Namespace) -> int:
         preset_spk_num=args.spk_num,
         **({"language": args.language} if args.language else {}),
         **({"batch_size_s": args.batch_size_s} if args.batch_size_s is not None else {}),
+        **({"max_new_tokens": args.max_new_tokens} if args.max_new_tokens is not None else {}),
     )
     _log(f"inference done in {time.time() - t0:.1f}s")
 
@@ -309,6 +318,10 @@ def _build_parser() -> argparse.ArgumentParser:
     p_tr.add_argument(
         "--batch-size-s", type=int, default=None,
         help="动态 batch 时长阈值（秒），覆盖模型默认值",
+    )
+    p_tr.add_argument(
+        "--max-new-tokens", type=int, default=None,
+        help="MOSS 后端的 max_new_tokens 上限；FunASR 模型忽略此参数",
     )
     p_tr.add_argument(
         "--polish",
