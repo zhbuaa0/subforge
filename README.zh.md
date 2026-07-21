@@ -359,6 +359,34 @@ subforge/
 
 MIT
 
+## 部署
+
+| 场景 | 指南 |
+|---|---|
+| **Windows + WSL2 (推荐家用 RTX)** | 跳 [docs/DEPLOYMENT.md §1](docs/DEPLOYMENT.md#1-wsl2-部署推荐-windows-用户) |
+| **Linux 服务器 (生产，含 vLLM)** | 跳 [docs/DEPLOYMENT.md §2](docs/DEPLOYMENT.md#2-linux-服务器原生部署) |
+| **MOSS 加速 (vLLM / sdpa / Flash-Attn)** | 跳 [docs/DEPLOYMENT.md §3](docs/DEPLOYMENT.md#3-moss-加速方案vllm--sdpa) |
+| **快速 pip install** | 看 [requirements/README.md](requirements/README.md) |
+
+Python 依赖按后端拆分:
+
+```bash
+# 仅 CPU 模式(不需要 GPU)
+pip install -r requirements/base.txt -r requirements/funasr.txt -r requirements/moss.txt
+
+# GPU: 先装 torch(从 pytorch.org 选你的 CUDA 版本)
+#     然后再装 Python 依赖:
+pip install -r requirements/base.txt -r requirements/funasr.txt -r requirements/moss.txt
+```
+
+或者用 `pyproject.toml` extras:
+
+```bash
+pip install -e ".[moss-runtime]"        # base + MOSS 后端
+pip install -e ".[gpu-cu121]"          # CUDA 12.1 全部
+pip install -e ".[cpu-all]"             # 全部, 不用 GPU
+```
+
 ## 致谢
 
 - [FunASR](https://github.com/modelscope/FunASR) —— 底层 ASR / VAD / 标点 / 说话人工具

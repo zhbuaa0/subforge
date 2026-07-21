@@ -1,0 +1,4 @@
+# MOSS 后端依赖（HuggingFace transformers + MOSS 模型包）
+moss-transcribe-diarize>=0.1.0
+numba>=0.61
+huggingface-hub>=0.25

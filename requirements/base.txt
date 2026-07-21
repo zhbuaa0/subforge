@@ -1,0 +1,22 @@
+# subforge runtime core
+# 纯 Python 部分；不含 torch / funasr / transformers（按 backend 拆开在下面的 txt 里）
+
+pyyaml>=6.0
+fastapi>=0.110
+uvicorn[standard]>=0.27
+python-multipart>=0.0.9
+websockets>=12
+
+# MOSS backend 必须依赖（HF transformers 在 Linux x86_64 上 wheel 已自带 torch 兼容检查）
+transformers>=5.0,<6.0
+tokenizers>=0.20
+numpy>=1.26,<3
+av>=14.0
+soundfile>=0.12
+librosa>=0.11.0
+soxr>=0.5
+safetensors>=0.6.2
+
+# Web 客户端 / polish LLM 调用
+httpx>=0.27
+packaging>=21

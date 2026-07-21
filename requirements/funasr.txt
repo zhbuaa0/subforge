@@ -1,0 +1,18 @@
+# FunASR 后端依赖
+# Paraformer / SenseVoice / seaco-paraformer / streaming 都走 funasr.AutoModel
+funasr>=1.3.16
+modelscope>=1.38
+
+# funasr 内部依赖（按 funasr 源码 import 列出）
+kaldiio>=2.18
+torch-complex
+sentencepiece>=0.2
+jieba>=0.42
+hydra-core>=1.3
+omegaconf>=2.3
+jamo>=0.4.1
+jaconv>=0.5
+librosa>=0.11.0
+soundfile>=0.12
+soxr>=0.5
+tiktoken>=0.7

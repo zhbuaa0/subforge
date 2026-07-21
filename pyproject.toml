@@ -10,26 +10,156 @@ readme = "README.md"
 requires-python = ">=3.10"
 license = { text = "MIT" }
 authors = [{ name = "subforge contributors" }]
-keywords = ["asr", "speech-recognition", "paraformer", "sensevoice", "funasr", "modelscope", "chinese", "subtitles", "srt", "vtt", "lrc"]
+keywords = [
+    "asr", "speech-recognition", "paraformer", "sensevoice", "funasr",
+    "moss", "modelscope", "chinese", "subtitles", "srt", "vtt", "lrc",
+    "speaker-diarization",
+]
 
-# 已通过 conda 安装，不在 pip 依赖里约束（环境相关的 CUDA 轮子）
+# 运行时核心：纯 Python，不含任何 CUDA wheel（torch/funasr 的 CUDA 编译
+# 版本取决于 OS + Python 版本 + CUDA toolkit 版本，必须独立选择；见 extras）。
 dependencies = [
     "pyyaml>=6.0",
     "fastapi>=0.110",
     "uvicorn[standard]>=0.27",
     "python-multipart>=0.0.9",
     "websockets>=12",
+    # MOSS backend 需要（funasr 通过 extras 单独装）
+    "transformers>=5.0,<6.0",
+    "tokenizers>=0.20",
+    "numpy>=1.26,<3",
+    "av>=14.0",
+    "soundfile>=0.12",
+    "librosa>=0.11.0",
+    "soxr>=0.5",
+    "safetensors>=0.6.2",
+    "httpx>=0.27",
+    "packaging>=21",
 ]
 
 [project.optional-dependencies]
-dev = [
-    "pytest>=8.0",
-    "httpx>=0.27",
+
+# === CUDA torch 兼容多版本（markers：仅 Linux x86_64）===
+# 用户需按 CUDA 版本选一个；pip 会按 platform/sys_platform marker 解析。
+torch-cpu   = ["torch>=2.8,<3",       "torchaudio>=2.8,<3"]
+torch-cu118 = [
+    "torch>=2.8,<3       ; platform_machine == 'x86_64' and sys_platform == 'linux'",
+    "torchaudio>=2.8,<3 ; platform_machine == 'x86_64' and sys_platform == 'linux'",
 ]
-# MOSS 后端的 transformers + 模型包；torch 走 conda 渠道（funasr 也是同样约定）
+torch-cu121 = [
+    "torch>=2.8,<3       ; platform_machine == 'x86_64' and sys_platform == 'linux'",
+    "torchaudio>=2.8,<3 ; platform_machine == 'x86_64' and sys_platform == 'linux'",
+]
+torch-cu124 = [
+    "torch>=2.8,<3       ; platform_machine == 'x86_64' and sys_platform == 'linux'",
+    "torchaudio>=2.8,<3 ; platform_machine == 'x86_64' and sys_platform == 'linux'",
+]
+
+# === FunASR 后端（Paraformer / SenseVoice / streaming）===
+funasr-runtime = [
+    "funasr>=1.3.16",
+    "modelscope>=1.38",
+    # funasr 内部依赖
+    "kaldiio>=2.18",
+    "torch-complex",
+    "sentencepiece>=0.2",
+    "jieba>=0.42",
+    "hydra-core>=1.3",
+    "omegaconf>=2.3",
+    "jamo>=0.4.1",
+    "jaconv>=0.5",
+    "librosa>=0.11.0",
+    "soundfile>=0.12",
+    "soxr>=0.5",
+    "tiktoken>=0.7",
+]
+
+# === MOSS 后端（HF transformers + 模型包）===
 moss-runtime = [
     "moss-transcribe-diarize>=0.1.0",
+    "numba>=0.61",          # moss 必需
+    "huggingface-hub>=0.25", # 下载模型权重
 ]
+
+# === vLLM 推理服务（生产部署；用 uv pip 装 nightly，详见 DEPLOYMENT.md）===
+vllm-runtime = [
+    "openai>=1.0",          # 用 OpenAI 兼容协议调用 vllm 服务端
+    "soundfile>=0.12",
+]
+
+# === 全栈 CPU 模式（开发机，不需要 CUDA）===
+cpu-all = [
+    "torch>=2.8,<3", "torchaudio>=2.8,<3",
+    "funasr>=1.3.16", "modelscope>=1.38",
+    "kaldiio>=2.18", "torch-complex", "sentencepiece>=0.2",
+    "jieba>=0.42", "hydra-core>=1.3", "omegaconf>=2.3",
+    "jamo>=0.4.1", "jaconv>=0.5",
+    "soundfile>=0.12", "tiktoken>=0.7",
+    "moss-transcribe-diarize>=0.1.0", "numba>=0.61",
+    "huggingface-hub>=0.25",
+]
+
+# === 全栈 GPU 模式（Linux x86_64 + CUDA，按版本选）===
+gpu-cu118 = [
+    "torch>=2.8,<3       ; platform_machine == 'x86_64' and sys_platform == 'linux'",
+    "torchaudio>=2.8,<3 ; platform_machine == 'x86_64' and sys_platform == 'linux'",
+    "funasr>=1.3.16", "modelscope>=1.38",
+    "kaldiio>=2.18", "torch-complex", "sentencepiece>=0.2",
+    "jieba>=0.42", "hydra-core>=1.3", "omegaconf>=2.3",
+    "jamo>=0.4.1", "jaconv>=0.5",
+    "soundfile>=0.12", "tiktoken>=0.7",
+    "moss-transcribe-diarize>=0.1.0", "numba>=0.61",
+    "huggingface-hub>=0.25",
+]
+# cu121 / cu124 用相同依赖列表，CUDA 版本由 torch wheel index 控制
+gpu-cu121 = [
+    "torch>=2.8,<3       ; platform_machine == 'x86_64' and sys_platform == 'linux'",
+    "torchaudio>=2.8,<3 ; platform_machine == 'x86_64' and sys_platform == 'linux'",
+    "funasr>=1.3.16", "modelscope>=1.38",
+    "kaldiio>=2.18", "torch-complex", "sentencepiece>=0.2",
+    "jieba>=0.42", "hydra-core>=1.3", "omegaconf>=2.3",
+    "jamo>=0.4.1", "jaconv>=0.5",
+    "soundfile>=0.12", "tiktoken>=0.7",
+    "moss-transcribe-diarize>=0.1.0", "numba>=0.61",
+    "huggingface-hub>=0.25",
+]
+gpu-cu124 = [
+    "torch>=2.8,<3       ; platform_machine == 'x86_64' and sys_platform == 'linux'",
+    "torchaudio>=2.8,<3 ; platform_machine == 'x86_64' and sys_platform == 'linux'",
+    "funasr>=1.3.16", "modelscope>=1.38",
+    "kaldiio>=2.18", "torch-complex", "sentencepiece>=0.2",
+    "jieba>=0.42", "hydra-core>=1.3", "omegaconf>=2.3",
+    "jamo>=0.4.1", "jaconv>=0.5",
+    "soundfile>=0.12", "tiktoken>=0.7",
+    "moss-transcribe-diarize>=0.1.0", "numba>=0.61",
+    "huggingface-hub>=0.25",
+]
+
+# === 开发依赖 ===
+dev = [
+    "pytest>=8.0",
+    "pytest-asyncio>=0.23",
+    "httpx>=0.27",
+    "mypy>=1.10",
+    "ruff>=0.6",
+]
+
+# === 全装（不含 torch，按需从 conda 装）===
+all = [
+    "funasr>=1.3.16", "modelscope>=1.38",
+    "kaldiio>=2.18", "torch-complex", "sentencepiece>=0.2",
+    "jieba>=0.42", "hydra-core>=1.3", "omegaconf>=2.3",
+    "jamo>=0.4.1", "jaconv>=0.5",
+    "soundfile>=0.12", "tiktoken>=0.7",
+    "moss-transcribe-diarize>=0.1.0", "numba>=0.61",
+    "huggingface-hub>=0.25",
+    "openai>=1.0",
+    "pytest>=8.0", "pytest-asyncio>=0.23", "mypy>=1.10", "ruff>=0.6",
+]
+
+[project.urls]
+"Homepage"   = "https://github.com/zhbuaa0/subforge"
+"Bug Reports" = "https://github.com/zhbuaa0/subforge/issues"
 
 [project.scripts]
 asr = "subforge.cli:main"
@@ -39,7 +169,11 @@ packages = ["subforge"]
 include-package-data = true
 
 [tool.setuptools.package-data]
-subforge = ["py.typed"]
+subforge = ["py.typed", "web/*.html"]
 
 [tool.setuptools.package_dir]
 "" = "."
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]

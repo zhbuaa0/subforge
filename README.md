@@ -57,6 +57,34 @@ asr server --host 0.0.0.0 --port 8000   # web UI
 | `paraformer-zh-streaming` | FunASR | Chinese | no | **yes** |
 | `moss-transcribe-diarize` | **MOSS** | 50+ languages | auto (e2e) | no |
 
+### Deployment
+
+| Scenario | Guide |
+|---|---|
+| **Windows + WSL2 (recommended for RTX GPUs)** | See [docs/DEPLOYMENT.md §1](docs/DEPLOYMENT.md#1-wsl2-部署推荐-windows-用户) |
+| **Linux server (production, includes vLLM)** | See [docs/DEPLOYMENT.md §2](docs/DEPLOYMENT.md#2-linux-服务器原生部署) |
+| **MOSS speedup (vLLM / sdpa / Flash-Attn)** | See [docs/DEPLOYMENT.md §3](docs/DEPLOYMENT.md#3-moss-加速方案vllm--sdpa) |
+| **Quick `pip install`** | See [requirements/README.md](requirements/README.md) |
+
+Python requirements are organized by backend:
+
+```bash
+# CPU-only (no GPU)
+pip install -r requirements/base.txt -r requirements/funasr.txt -r requirements/moss.txt
+
+# GPU: install torch first (pick your CUDA from pytorch.org),
+# then the Python deps:
+pip install -r requirements/base.txt -r requirements/funasr.txt -r requirements/moss.txt
+```
+
+Or with `pyproject.toml` extras:
+
+```bash
+pip install -e ".[moss-runtime]"        # base + MOSS backend
+pip install -e ".[gpu-cu121]"          # everything for CUDA 12.1
+pip install -e ".[cpu-all]"             # everything, no GPU
+```
+
 ### License
 
 MIT
