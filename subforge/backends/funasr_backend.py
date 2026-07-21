@@ -8,11 +8,19 @@ path — this module is the new home for the exact same code.
 
 from __future__ import annotations
 
+import os
+import sys
 import threading
 from typing import Any, Iterable
 
 from ..config import ModelSpec
 from ..transcriber import TranscriptResult, _apply_postprocess, _normalize
+
+
+def _log(msg: str) -> None:
+    if os.environ.get("SUBFORGE_QUIET") == "1":
+        return
+    print(msg, file=sys.stderr, flush=True)
 
 
 class FunasrBackend:
@@ -39,14 +47,17 @@ class FunasrBackend:
         audio: str | Iterable[str],
         *,
         preset_spk_num: int | None = None,
+        progress: "ProgressCallback | None" = None,
         **generate_overrides: Any,
     ) -> list[TranscriptResult]:
         """Run FunASR ``AutoModel.generate(...)`` and normalize the output.
 
-        Mirrors the pre-refactor Transcriber behaviour exactly:
-        - merges spec.generate with overrides
-        - drops ``preset_spk_num`` when None (FunASR auto-detects speakers)
-        - applies spec.postprocess if set
+        Args:
+            progress: Optional callback ``(phase: str, pct: float, msg: str)``.
+                FunASR's ``AutoModel.generate`` is a black box, so we report
+                coarse phases (``loading_model``, ``vad``, ``asr``, ``spk``,
+                ``done``) instead of token-level progress.  MOSS backend has
+                fine-grained token callbacks; FunASR doesn't expose them.
         """
         gen_kwargs: dict[str, Any] = dict(self.spec.generate)
         gen_kwargs.update(generate_overrides)
@@ -54,8 +65,28 @@ class FunasrBackend:
             gen_kwargs["preset_spk_num"] = int(preset_spk_num)
         # funasr 不接受 preset_spk_num=None；省略即自动检测（关键！）
 
+        # FunASR 自带 tqdm 进度条到 stderr；在交互终端里开启
+        # (非 TTY 场景会被 funasr 自己跳过)
+        gen_kwargs.setdefault("disable_tqdm", not sys.stderr.isatty())
+
+        if progress is not None:
+            progress("loading_model", 0.05, f"loading {self.spec.model}")
+
         raw = self.model.generate(input=audio, **gen_kwargs)
+
+        if progress is not None:
+            progress("postprocess", 0.95, "normalizing segments")
+
         results = _normalize(raw or [])
         if results:
             _apply_postprocess(results, self.spec)
+
+        if progress is not None:
+            progress("done", 1.0, "complete")
+
         return results
+
+
+# 进度回调类型（与 MossBackend 共享签名）
+from typing import Callable
+ProgressCallback = Callable[[str, float, str], None]

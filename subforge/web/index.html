@@ -351,7 +351,14 @@
 
       <div id="status-bar">
         <div class="spinner"></div>
-        <span id="status-text">上传并识别中…</span>
+        <div style="flex:1;">
+          <div style="display:flex; justify-content:space-between; align-items:baseline;">
+            <span id="status-text">上传并识别中…</span>
+            <span id="status-pct" style="font-size:12px; color:var(--text-dim); font-variant-numeric:tabular-nums;">—</span>
+          </div>
+          <progress id="status-progress" value="0" max="1" style="display:block; width:100%; height:6px; margin-top:4px;"></progress>
+          <div id="status-phase" style="font-size:11px; color:var(--text-dim); margin-top:2px; min-height:1em;"></div>
+        </div>
       </div>
     </section>
 
@@ -633,36 +640,85 @@ form.addEventListener('submit', async (ev) => {
 
   submitBtn.disabled = true;
   statusBar.classList.add('show');
-  statusText.textContent = usePolish
-    ? `上传 ${file.name} (${(file.size/1024/1024).toFixed(2)}MB) 并识别 + AI 润色…`
-    : `上传 ${file.name} (${(file.size/1024/1024).toFixed(2)}MB) 并识别中…`;
   resultEl.classList.remove('show');
   $('#result-polished').style.display = 'none';
 
+  // Reset progress UI
+  const progressEl = $('#status-progress');
+  const pctEl = $('#status-pct');
+  const phaseEl = $('#status-phase');
+  progressEl.value = 0;
+  pctEl.textContent = '0%';
+  phaseEl.textContent = '';
+
+  statusText.textContent = usePolish
+    ? `上传 ${file.name} (${(file.size/1024/1024).toFixed(2)}MB) 并识别 + AI 润色…`
+    : `上传 ${file.name} (${(file.size/1024/1024).toFixed(2)}MB) 并识别中…`;
+
   const t0 = Date.now();
+  let job_id;
   try {
     const r = await fetch('/transcribe', { method: 'POST', body: fd });
-    const dt = ((Date.now() - t0) / 1000).toFixed(1);
-
     if (!r.ok) {
       const err = await r.json().catch(() => ({ detail: r.statusText }));
       throw new Error(`[${r.status}] ${err.detail || 'request failed'}`);
     }
-    const data = await r.json();
+    ({ job_id } = await r.json());
+    statusText.textContent = `推理中… (job ${job_id})`;
+
+    // Poll /jobs/{id} at 1Hz.  Simple and reliable across browsers/proxies;
+    // SSE remains available at /jobs/{id}/events for programmatic clients.
+    const data = await pollUntilDone(job_id);
+
+    const dt = ((Date.now() - t0) / 1000).toFixed(1);
     const base = file.name.replace(/\.[^.]+$/, '') || 'transcript';
+    progressEl.value = 1;
+    pctEl.textContent = '100%';
+    phaseEl.textContent = `完成 · ${dt}s`;
     statusText.textContent = `✓ 完成 ${dt}s · ${data.segments?.length || 0} 段 · ${data.num_speakers ?? '?'} 说话人${data.polished ? ' · ✨ 已润色' : ''}`;
-    setTimeout(() => statusBar.classList.remove('show'), 2500);
+    setTimeout(() => statusBar.classList.remove('show'), 3500);
     renderResult(data, base);
     if (data.polished) {
       renderPolished(data, base);
     }
   } catch (e) {
     statusText.textContent = `✗ ${e.message}`;
+    phaseEl.textContent = e.message;
+    progressEl.value = 0;
     setTimeout(() => statusBar.classList.remove('show'), 8000);
   } finally {
     submitBtn.disabled = false;
   }
 });
+
+// Poll /jobs/{id} until terminal status; returns the result object on done.
+async function pollUntilDone(job_id) {
+  const start = Date.now();
+  const progressEl = $('#status-progress');
+  const pctEl = $('#status-pct');
+  const phaseEl = $('#status-phase');
+  while (Date.now() - start < 30 * 60 * 1000) {  // 30 min cap
+    const r = await fetch(`/jobs/${job_id}`);
+    if (!r.ok) {
+      // 404 right after submit can happen briefly; wait & retry
+      if (r.status === 404) {
+        await new Promise(res => setTimeout(res, 200));
+        continue;
+      }
+      throw new Error(`job ${job_id} not found (HTTP ${r.status})`);
+    }
+    const snap = await r.json();
+    if (typeof snap.progress === 'number') {
+      progressEl.value = snap.progress;
+      pctEl.textContent = `${Math.round(snap.progress * 100)}%`;
+    }
+    if (snap.phase) phaseEl.textContent = snap.phase + (snap.message ? ` · ${snap.message}` : '');
+    if (snap.status === 'done') return snap.result;
+    if (snap.status === 'error') throw new Error(snap.error || 'job failed');
+    await new Promise(res => setTimeout(res, 1000));
+  }
+  throw new Error('job timed out after 30 min');
+}
 
 modelSelect.addEventListener('change', onModelChange);
 

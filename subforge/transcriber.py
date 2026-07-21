@@ -148,6 +148,7 @@ class Transcriber:
         audio: str | Iterable[str],
         *,
         preset_spk_num: int | None = None,
+        progress: "Callable[[str, float, str], None] | None" = None,
         **generate_overrides: Any,
     ) -> list[TranscriptResult]:
         """对单个或多个音频做识别（委托给 backend）。
@@ -155,17 +156,21 @@ class Transcriber:
         Args:
             audio: 单个路径/URL 或可迭代的多个；backend 实现自行决定如何处理。
             preset_spk_num: 强制说话人数；仅 FunasrBackend 使用，MossBackend 忽略。
+            progress: 可选回调 ``(phase, pct, msg)``；用于在 Web UI SSE 上报进度。
             **generate_overrides: 临时覆盖 spec.generate 中的字段。
 
         Returns:
             与输入一一对应的 TranscriptResult 列表。
         """
         # FunasrBackend 接受 ``preset_spk_num`` 关键字；MossBackend 忽略它
+        kwargs: dict[str, Any] = dict(generate_overrides)
+        if progress is not None:
+            kwargs["progress"] = progress
         if preset_spk_num is not None:
             return self.backend.transcribe(
-                audio, preset_spk_num=preset_spk_num, **generate_overrides
+                audio, preset_spk_num=preset_spk_num, **kwargs
             )
-        return self.backend.transcribe(audio, **generate_overrides)
+        return self.backend.transcribe(audio, **kwargs)
 
 
 # ---------- 工具：从保存的 funasr JSON 还原 TranscriptResult ----------
