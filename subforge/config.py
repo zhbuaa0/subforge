@@ -14,9 +14,63 @@ from pathlib import Path
 from typing import Any
 
 import yaml
+import os
+import re
 
 # models.yaml 与本文件相对路径（仓库根）
 _DEFAULT_YAML = Path(__file__).resolve().parent.parent / "models.yaml"
+
+
+# ---------------------------------------------------------------------------
+# Lightweight YAML string expansion
+# ---------------------------------------------------------------------------
+# Supports the bash-style ``${VAR}`` and ``${VAR:-default}`` references in
+# ``models.yaml`` so users can wire environment variables into the registry
+# without a templating layer:
+
+#     base_url: ${SUBFORGE_VLLM_BASE_URL:-http://127.0.0.1:8001}
+#     api_key_env: ${SUBFORGE_VLLM_API_KEY_ENV:-}
+
+# Rules:
+#   * ``${VAR}``           -- substitute $VAR; raise if unset (we want loud
+#                             failure for typos, not silent empty strings).
+#   * ``${VAR:-default}``  -- substitute $VAR if set and non-empty, else
+#                             ``default``. Empty $VAR also falls back.
+#   * Anything else is left alone (literal ``$`` characters are uncommon
+#     in URLs / model IDs / API key names so this stays simple).
+_ENV_REF_RE = re.compile(r"\$\{([A-Za-z_][A-Za-z0-9_]*)(?::-([^}]*))?\}")
+
+
+def _expand_env_str(s: str) -> str:
+    def repl(m: re.Match[str]) -> str:
+        var, default = m.group(1), m.group(2)
+        val = os.environ.get(var)
+        if val:
+            return val
+        if default is not None:
+            return default
+        raise ValueError(
+            f"models.yaml: 环境变量 ${var} 未设且无默认值;"
+            " 请在 shell 里 export 后重试"
+        )
+
+    return _ENV_REF_RE.sub(repl, s)
+
+
+def _expand_env_in(obj: Any) -> Any:
+    """Recursively expand env refs in nested dict / list / string leaves.
+
+    Used by ``_coerce_spec`` to scrub ``init`` and ``generate`` blocks. Features
+    stay as raw strings (treating ``${...}`` as opaque metadata) so the user
+    can read them as-is in ``asr models`` output.
+    """
+    if isinstance(obj, dict):
+        return {k: _expand_env_in(v) for k, v in obj.items()}
+    if isinstance(obj, list):
+        return [_expand_env_in(v) for v in obj]
+    if isinstance(obj, str):
+        return _expand_env_str(obj)
+    return obj
 
 
 @dataclass
@@ -28,7 +82,7 @@ class ModelSpec:
 
     name: str
     model: str
-    backend: str = "funasr"  # "funasr" (default) or "moss"
+    backend: str = "funasr"  # "funasr" (default), "moss", or "vllm"
     vad_model: str | None = None
     punc_model: str | None = None
     spk_model: str | None = None
@@ -74,9 +128,9 @@ def _coerce_spec(name: str, raw: dict[str, Any]) -> ModelSpec:
         raise ValueError(f"model '{name}': 缺少必填字段 'model'")
 
     backend = str(raw.get("backend", "funasr"))
-    if backend not in {"funasr", "moss"}:
+    if backend not in {"funasr", "moss", "vllm"}:
         raise ValueError(
-            f"model '{name}': backend='{backend}' 不支持；可选：funasr, moss"
+            f"model '{name}': backend='{backend}' 不支持；可选：funasr, moss, vllm"
         )
 
     streaming = bool(raw.get("streaming", False))
@@ -92,8 +146,10 @@ def _coerce_spec(name: str, raw: dict[str, Any]) -> ModelSpec:
         vad_model=raw.get("vad_model"),
         punc_model=raw.get("punc_model"),
         spk_model=raw.get("spk_model"),
-        init=dict(raw.get("init") or {}),
-        generate=dict(raw.get("generate") or {}),
+        # Expand ${VAR:-default} so users can point the vLLM backend at
+        # whatever endpoint matches their environment.
+        init=_expand_env_in(dict(raw.get("init") or {})),
+        generate=_expand_env_in(dict(raw.get("generate") or {})),
         postprocess=raw.get("postprocess"),
         streaming=streaming,
         features=features,

@@ -96,6 +96,15 @@ def cmd_transcribe(args: argparse.Namespace) -> int:
 
     transcriber, model_name = _build_transcriber(args.model, args.config)
 
+    # --vllm-url 仅对 backend=vllm 生效;其它后端给出明确错误避免 silent drop。
+    if args.vllm_url and transcriber.spec.backend != "vllm":
+        print(
+            f"[ERR] --vllm-url 仅 backend=vllm 的模型可用;"
+            f" 当前 '{model_name}' 是 backend={transcriber.spec.backend!r}",
+            file=sys.stderr,
+        )
+        return 2
+
     formats = [f.strip().lower() for f in (args.format or "").split(",") if f.strip()]
 
     # 检查 spk-num 是否被该模型支持
@@ -120,6 +129,7 @@ def cmd_transcribe(args: argparse.Namespace) -> int:
         **({"language": args.language} if args.language else {}),
         **({"batch_size_s": args.batch_size_s} if args.batch_size_s is not None else {}),
         **({"max_new_tokens": args.max_new_tokens} if args.max_new_tokens is not None else {}),
+        **({"vllm_base_url": args.vllm_url} if args.vllm_url else {}),
     )
     _log(f"inference done in {time.time() - t0:.1f}s")
 
@@ -322,6 +332,14 @@ def _build_parser() -> argparse.ArgumentParser:
     p_tr.add_argument(
         "--max-new-tokens", type=int, default=None,
         help="MOSS 后端的 max_new_tokens 上限；FunASR 模型忽略此参数",
+    )
+    p_tr.add_argument(
+        "--vllm-url", default=None,
+        help=(
+            "vLLM OpenAI 兼容 endpoint (e.g. http://127.0.0.1:8001);"
+            " 仅 backend=vllm 的模型生效;"
+            " 省略时使用 models.yaml 里 init.base_url"
+        ),
     )
     p_tr.add_argument(
         "--polish",

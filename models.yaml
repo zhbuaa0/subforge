@@ -81,11 +81,14 @@ models:
 
   moss-transcribe-diarize:                # MOSS-Transcribe-Diarize 0.9B (HF transformers backend)
     backend: moss
-    model: OpenMOSS-Team/MOSS-Transcribe-Diarize
+    # 指向本地缓存权重(WSL ~/MOSS-Transcribe-Diarize/model_weights);
+    # HuggingFace model ID 仅在需要下载时使用。
+    model: /home/zhbuaa0/MOSS-Transcribe-Diarize/model_weights
     init:
       trust_remote_code: true
       dtype: bfloat16
       device_map: cuda:0
+      local_files_only: true
     generate:
       max_new_tokens: 65536
       do_sample: false
@@ -96,6 +99,32 @@ models:
       multilingual: true    # 50+ languages
       streaming: false      # MOSS 未提供流式推理
       best_for: long_form_meetings_and_podcasts
+
+  # 同模型，走 vLLM 服务端：
+  #   1) 在另一终端跑  vllm serve OpenMOSS-Team/MOSS-Transcribe-Diarize --trust-remote-code --port 8001
+  #   2) asr transcribe meeting.wav --model moss-transcribe-diarize-vllm [--vllm-url http://127.0.0.1:8001] -o out/
+  # 长音频 5-10× 加速 (RTX 4070 Ti 12 GB: RTF 0.3-0.6 vs HF 1.0-4.0)。
+  # 见 docs/DEPLOYMENT.md §3.3。
+  moss-transcribe-diarize-vllm:
+    backend: vllm
+    # 指向本地模型缓存,让 subforge 提示信息准确;实际推理走 vllm 服务端
+    model: /home/zhbuaa0/MOSS-Transcribe-Diarize/model_weights
+    init:
+      base_url: ${SUBFORGE_VLLM_BASE_URL:-http://127.0.0.1:8001}
+      api_key_env: ${SUBFORGE_VLLM_API_KEY_ENV:-}  # 空 = 无鉴权;需要时设 SUBFORGE_VLLM_API_KEY_ENV=xxxx + 对应 xxxx=$KEY
+      timeout: 3600             # 长音频 30+ 分钟,默认设 1 小时
+      model_name: OpenMOSS-Team/MOSS-Transcribe-Diarize
+    generate:
+      max_new_tokens: 65536
+      do_sample: false
+    features:
+      timestamps: true
+      speakers: true
+      punc: true
+      multilingual: true
+      streaming: false          # vLLM 也是非流式
+      best_for: long_form_meetings_and_podcasts_with_vllm
+      requires_external_service: "vllm serve OpenMOSS-Team/MOSS-Transcribe-Diarize --trust-remote-code --port 8001"
 
 # ---------- AI 润色 ----------
 # 通过 OpenAI 兼容 Chat Completions 接口调用 LLM，对 ASR 输出做"轻度清理"：

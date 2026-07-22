@@ -15,6 +15,84 @@ This project is primarily documented in Chinese. English users please see below 
 
 ---
 
+# 🧊 Cold Start Recovery
+
+> For Claude to resume project state without conversation context.
+
+## Environment
+
+```bash
+conda activate paraformer-asr    # MUST: base env lacks all dependencies
+# Python 3.10.20, torch 2.13.0, vllm 0.25.1, funasr 1.3.22
+# subforge already `pip install -e .` in paraformer-asr env
+```
+
+## Service Ports
+
+| Service | Port | Usage |
+|---|---|---|
+| subforge FastAPI + Web UI | **8002** (8000 was busy) | ASR transcription REST API |
+| vLLM (MOSS) | **8001** | OpenAI-compatible inference |
+| Legacy paraformer-asr | **8099** | standalone (ignore) |
+
+## Startup
+
+```bash
+# 1. Start subforge server (binds 0.0.0.0, CORS enabled)
+cd /home/zhbuaa0/subforge
+asr server --host 0.0.0.0 --port 8002 --log-level info
+
+# 2. Start vLLM (separate terminal, for MOSS inference)
+# NOTE: --max-model-len 16384 limits input+output tokens; long audio truncates.
+# Increase to 32768 or 65536 if you have more VRAM.
+vllm serve /home/zhbuaa0/MOSS-Transcribe-Diarize/model_weights \
+    --trust-remote-code --port 8001 --host 0.0.0.0 \
+    --gpu-memory-utilization 0.75 --max-model-len 16384 \
+    --max-num-batched-tokens 12288 --enforce-eager \
+    --served-model-name OpenMOSS-Team/MOSS-Transcribe-Diarize
+
+# 3. Local FunASR inference (no vLLM needed)
+asr transcribe input.wav -m paraformer-zh -o output/
+```
+
+## Quick Test
+
+```bash
+# Check vLLM health
+curl http://127.0.0.1:8001/health
+
+# Check subforge server
+curl http://127.0.0.1:8002/health
+curl http://127.0.0.1:8002/models
+
+# Submit transcription job
+curl -X POST http://127.0.0.1:8002/transcribe \
+  -F "file=@/path/to/audio.wav" \
+  -F "model=paraformer-zh" \
+  -F "formats=srt,json"
+```
+
+## Registered Models (6)
+
+| Name | Backend | Streaming | Speakers | Multilingual | Use case |
+|---|---|---|---|---|---|
+| `paraformer-zh` (default) | FunASR | no | auto | no | General ASR |
+| `seaco-paraformer-zh` | FunASR | no | overlapped | no | Meetings |
+| `sensevoice` | FunASR | no | no | zh/en/yue/ja/ko | Multilingual |
+| `paraformer-zh-streaming` | FunASR | yes | no | no | Live captions |
+| `moss-transcribe-diarize` | MOSS (HF) | no | auto (e2e) | 50+ langs | Long meetings |
+| `moss-transcribe-diarize-vllm` | vLLM | no | auto (e2e) | 50+ langs | Same MOSS, fast |
+
+## Known Issue: vLLM Truncation
+
+vLLM's `--max-model-len` limits **input + output tokens combined**. Long audio consumes many input tokens, leaving less for output → truncation. Fix: restart vLLM with larger `--max-model-len` (e.g. 32768 or 65536, if VRAM allows).
+
+---
+
+
+
+---
+
 ## TL;DR
 
 `subforge` is a subtitle-first Chinese ASR toolkit for **video editors, podcast producers, and content creators**. It supports two backends:

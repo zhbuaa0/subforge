@@ -33,6 +33,7 @@ from typing import Any
 os.environ.setdefault("PYTHONIOENCODING", "utf-8")
 
 from fastapi import FastAPI, File, Form, HTTPException, UploadFile, WebSocket, WebSocketDisconnect
+from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse
 
 from . import audio as audio_utils
@@ -172,6 +173,14 @@ app = FastAPI(
     description="FunASR / ModelScope 驱动的多模型中文语音识别 HTTP 服务",
     version="0.2.0",
     lifespan=lifespan,
+)
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
 )
 
 
@@ -574,7 +583,7 @@ async def ws_stream(ws: WebSocket):
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="paraformer-asr HTTP 服务")
-    parser.add_argument("--host", default="127.0.0.1")
+    parser.add_argument("--host", default="0.0.0.0")
     parser.add_argument("--port", type=int, default=8000)
     parser.add_argument("--reload", action="store_true", help="开发模式（auto-reload）")
     parser.add_argument("--log-level", default="info")

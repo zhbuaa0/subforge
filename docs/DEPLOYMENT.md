@@ -18,6 +18,7 @@ vLLM 在 Windows 上**无官方支持**（wheel 只有 manylinux），必须走 
 1. [WSL2 部署（推荐 Windows 用户）](#1-wsl2-部署推荐-windows-用户)
 2. [Linux 服务器原生部署](#2-linux-服务器原生部署)
 3. [MOSS 加速方案（vLLM / sdpa）](#3-moss-加速方案vllm--sdpa)
+   - [3.4 subforge 接入 vLLM](#34-subforge-接入-vllm)
 4. [验证清单](#4-验证清单)
 5. [运维](#5-运维)
 
@@ -197,7 +198,9 @@ vllm serve OpenMOSS-Team/MOSS-Transcribe-Diarize \
     --port 8001
 ```
 
-此时 subforge 自己跑在 8000，vLLM 跑在 8001。让 subforge 把 MOSS 请求转发到 vLLM，参考 [MossVllmAdapter](../subforge/backends/vllm_backend.py)（可作为下次扩展，subforge 暂未自动启用）。
+此时 subforge 跑在 8000，vLLM 跑在 8001。subforge v0.2+ 内置 `backend: vllm`
+适配器（`subforge/backends/vllm_backend.py`），可以直接把推理转发到 vLLM，
+详见 [§ 3.4](#34-subforge-接入-vllm)。
 
 ---
 
@@ -384,6 +387,65 @@ vllm serve OpenMOSS-Team/MOSS-Transcribe-Diarize \
 | HF + sdpa | 2.5 | ~3 小时 |
 | HF + flash-attn 2 | 2.0 | ~2.3 小时 |
 | **vLLM** | **0.3-0.6** | **~25-40 分钟** |
+
+### 3.4 subforge 接入 vLLM
+
+vLLM 服务起来后，subforge 注册表里已经包含 `moss-transcribe-diarize-vllm`
+条目（`models.yaml` 默认 `backend: vllm`）。`asr transcribe --model <name>`
+会走 OpenAI 兼容 `/v1/chat/completions` 把音频以 `data:audio/<fmt>;base64,...`
+内联进 chat messages（不需要 vLLM 访问本地文件系统），用 `stream=True`
+拉 token 增量同时驱动 stderr 进度条和 SSE 回调。
+
+```bash
+# 1. 装依赖（urllib 已经在 stdlib，vllm-runtime 只额外拉了 httpx 等)
+pip install -e ".[vllm-runtime]"
+
+# 2. 确认注册表项出现
+asr models | grep moss-transcribe-diarize-vllm
+
+# 3. 转写 — 让 asr 把请求转发给 vLLM
+asr transcribe meeting.wav \
+  --model moss-transcribe-diarize-vllm \
+  --max-new-tokens 65536 \
+  --format srt,json -o output/
+```
+
+#### 切换 vLLM 服务端
+
+两种方式，等价：
+
+```bash
+# A. 设环境变量（影响 models.yaml 里 ${SUBFORGE_VLLM_BASE_URL:-...} 占位符）
+export SUBFORGE_VLLM_BASE_URL=http://gpu-node-3:8001
+asr transcribe meeting.wav --model moss-transcribe-diarize-vllm ...
+
+# B. CLI 临时覆盖（不入环境变量)
+asr transcribe meeting.wav \
+  --model moss-transcribe-diarize-vllm \
+  --vllm-url http://gpu-node-3:8001 \
+  --format srt -o output/
+```
+
+#### 鉴权
+
+vLLM 启用 API key 时：
+
+```bash
+# SUBFORGE_VLLM_API_KEY_ENV 是 subforge 要读的环境变量名（指明"在哪找 key"）
+# VLLM_API_KEY 是真正的 key（vllm 服务端和 subforge 都用)
+export SUBFORGE_VLLM_API_KEY_ENV=VLLM_API_KEY
+export VLLM_API_KEY=sk-your-key
+asr transcribe ... --model moss-transcribe-diarize-vllm ...
+```
+
+空 `init.api_key_env`（默认）= 无 `Authorization` 头，对应未鉴权的 vLLM。
+
+#### 为什么 vLLM 后端无 weight，但 `backend: vllm` 仍出现在 `asr models`
+
+`asr models` 默认会懒加载默认模型（warm），但 vLLM 后端构造时**不发起
+网络请求** — 只 cache 配置，下次请求时再连服务端。这让 `asr server`
+启动不会因为 vLLM 暂时没起来就崩；首个 `/transcribe` 调用才会触发连接
+并按上述流程报错（明确说"vLLM 服务端不可达"）。
 
 ---
 

@@ -250,33 +250,54 @@ class MossBackend:
         )
 
         raw_text = result["text"]
-        moss_segs = parse_transcript(raw_text)
+        return _moss_text_to_result(raw_text)
 
-        # MOSS speaker strings → stable int IDs in first-appearance order
-        spk_map: dict[str, int] = {}
-        for s in moss_segs:
-            if s.speaker not in spk_map:
-                spk_map[s.speaker] = len(spk_map)
 
-        sub_segs = [
-            Segment(
-                start=s.start,
-                end=s.end,
-                text=s.text,
-                spk=spk_map.get(s.speaker),
-            )
-            for s in moss_segs
-        ]
+def _moss_text_to_result(raw_text: str) -> list[TranscriptResult]:
+    """Parse MOSS bracketed transcript text into a ``TranscriptResult``.
 
-        return [
-            TranscriptResult(
-                text="".join(s.text for s in sub_segs),
-                segments=sub_segs,
-                num_speakers=len(spk_map) if spk_map else None,
-                language=None,
-                # raw 留 None：subforge.exporters.to_json() 检测到 raw 缺失时会回退到
-                # funasr 形状的 sentence_info 序列化，保证 ``asr export`` / 下游消费脚本
-                # 拿到统一 schema。MOSS 自身的 prompt_len / generated_tokens 仅 debug 用。
-                raw=None,
-            )
-        ]
+    Shared by ``MossBackend`` (local HF transformers) and ``MossVllmBackend``
+    (vLLM server via OpenAI compat). Both paths end with the same bracketed
+    transcript (``[start][Sxx]...text...[end]``); running it through this
+    helper guarantees exporters / SSE progress / REST API all see identical
+    output regardless of where inference ran.
+
+    MOSS speaker strings (``"S01"``, ``"S02"``, ...) are mapped to stable int
+    IDs in first-appearance order so the rest of subforge (which uses
+    ``Segment.spk: int``) works unchanged.
+    """
+    # Deferred import so callers can import this module without
+    # moss-transcribe-diarize installed (they only fail when they actually
+    # transcribe). Same lazy pattern as inside MossBackend.transcribe itself.
+    from moss_transcribe_diarize import parse_transcript  # type: ignore
+
+    moss_segs = parse_transcript(raw_text)
+
+    # MOSS speaker strings → stable int IDs in first-appearance order
+    spk_map: dict[str, int] = {}
+    for s in moss_segs:
+        if s.speaker not in spk_map:
+            spk_map[s.speaker] = len(spk_map)
+
+    sub_segs = [
+        Segment(
+            start=s.start,
+            end=s.end,
+            text=s.text,
+            spk=spk_map.get(s.speaker),
+        )
+        for s in moss_segs
+    ]
+
+    return [
+        TranscriptResult(
+            text="".join(s.text for s in sub_segs),
+            segments=sub_segs,
+            num_speakers=len(spk_map) if spk_map else None,
+            language=None,
+            # raw 留 None：subforge.exporters.to_json() 检测到 raw 缺失时会回退到
+            # funasr 形状的 sentence_info 序列化，保证 ``asr export`` / 下游消费脚本
+            # 拿到统一 schema。MOSS 自身的 prompt_len / generated_tokens 仅 debug 用。
+            raw=None,
+        )
+    ]

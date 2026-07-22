@@ -3,6 +3,97 @@
 > **字幕工坊 —— 双引擎 ASR 中文语音识别 + 字幕工具。**
 > 把音频一键转成可编辑字幕 —— SRT / VTT / LRC 直接导入 Premiere、Final Cut、剪映、CapCut、Audacity。
 
+---
+
+# 🧊 冷启动快速恢复
+
+> 以下信息供 Claude 在无上下文时快速恢复项目状态。
+
+## 环境
+
+```bash
+conda activate paraformer-asr    # 必须！base 环境缺少所有依赖
+# Python 3.10.20, torch 2.13.0, vllm 0.25.1, funasr 1.3.22
+# subforge 已 `pip install -e .`，装在 paraformer-asr 环境
+```
+
+## 服务端口
+
+| 服务 | 端口 | 用途 |
+|---|---|---|
+| subforge FastAPI + Web UI | **8002** (8000 被占用时) | ASR 转写 REST API |
+| vLLM (MOSS) | **8001** | OpenAI 兼容推理 |
+| 旧版 paraformer-asr | **8099** | 独立部署（可忽略） |
+
+## 启动命令
+
+```bash
+# 1. 启动 subforge server（绑定 0.0.0.0，已开 CORS）
+cd /home/zhbuaa0/subforge
+asr server --host 0.0.0.0 --port 8002 --log-level info
+
+# 2. 启动 vLLM（另一终端，用于 MOSS 推理）
+# 注意：--max-model-len 16384 限制输入+输出总 token，长音频会被截断
+# 显存够可调大到 32768 或 65536，重启 vLLM 生效
+vllm serve /home/zhbuaa0/MOSS-Transcribe-Diarize/model_weights \
+    --trust-remote-code \
+    --port 8001 \
+    --host 0.0.0.0 \
+    --gpu-memory-utilization 0.75 \
+    --max-model-len 16384 \
+    --max-num-batched-tokens 12288 \
+    --enforce-eager \
+    --served-model-name OpenMOSS-Team/MOSS-Transcribe-Diarize
+
+# 3. 本地 FunASR 推理（无需 vLLM）
+asr transcribe input.wav -m paraformer-zh -o output/
+```
+
+## vLLM 端点测试
+
+```bash
+# 测试 vLLM 健康
+curl http://127.0.0.1:8001/health
+
+# 查看 vLLM 已注册路由
+curl -s http://127.0.0.1:8001/v1/models
+
+# 测试 subforge server
+curl http://127.0.0.1:8002/health
+curl http://127.0.0.1:8002/models
+
+# 提交转写任务（model 可选：paraformer-zh / moss-transcribe-diarize / moss-transcribe-diarize-vllm）
+curl -X POST http://127.0.0.1:8002/transcribe \
+  -F "file=@/path/to/audio.wav" \
+  -F "model=paraformer-zh" \
+  -F "formats=srt,json"
+
+# 查看任务状态（替换 JOB_ID）
+curl http://127.0.0.1:8002/jobs/JOB_ID
+
+# SSE 流式进度
+curl -N http://127.0.0.1:8002/jobs/JOB_ID/events
+```
+
+## 模型一览（6 个已注册）
+
+| 名字 | 后端 | 流式 | 说话人 | 多语种 | 场景 |
+|---|---|---|---|---|---|
+| `paraformer-zh` (默认) | FunASR | 否 | auto | 否 | 通用 ASR |
+| `seaco-paraformer-zh` | FunASR | 否 | 重叠语音 | 否 | 访谈/会议 |
+| `sensevoice` | FunASR | 否 | 否 | 是 (zh/en/yue/ja/ko) | 多语种 |
+| `paraformer-zh-streaming` | FunASR | 是 | 否 | 否 | 直播字幕 |
+| `moss-transcribe-diarize` | MOSS (HF) | 否 | auto (e2e) | 是 (50+) | 长会议/播客 |
+| `moss-transcribe-diarize-vllm` | vLLM | 否 | auto (e2e) | 是 (50+) | 同 MOSS，更快 |
+
+## 已知问题：vLLM 长音频截断
+
+vLLM 的 `--max-model-len 16384` 限制的是**输入 + 输出 token 总和**。长音频编码后输入占的空间大，输出被压缩导致截断。解决：重启 vLLM 并调大 `--max-model-len`（显存允许范围内，如 32768 或 65536）。
+
+---
+
+# 📖 详细文档
+
 [![Python](https://img.shields.io/badge/python-3.10+-blue.svg)](https://www.python.org/)
 [![PyPI](https://img.shields.io/badge/pip-install-blue.svg)](https://pypi.org/)
 [![CUDA](https://img.shields.io/badge/CUDA-12.1-green.svg)](https://developer.nvidia.com/cuda-toolkit)
@@ -120,13 +211,13 @@ curl http://localhost:8000/models
 
 # 转写（multipart 上传，FunASR）
 curl -X POST http://localhost:8000/transcribe \
-  -F "audio=@interview.wav" \
+  -F "file=@interview.wav" \
   -F "model=paraformer-zh" \
   -F "formats=srt,vtt"
 
 # 转写（multipart 上传，MOSS）
 curl -X POST http://localhost:8000/transcribe \
-  -F "audio=@meeting.wav" \
+  -F "file=@meeting.wav" \
   -F "model=moss-transcribe-diarize" \
   -F "formats=srt,json"
 ```
@@ -148,7 +239,7 @@ with open("interview.wav", "rb") as f:
     r = httpx.post(
         "http://localhost:8000/transcribe",
         data={"model": "paraformer-zh", "formats": "srt,json"},
-        files={"audio": f},
+        files={"file": f},
     )
 data = r.json()
 print(data["num_speakers"])              # 2
@@ -160,7 +251,7 @@ with open("meeting.wav", "rb") as f:
     r = httpx.post(
         "http://localhost:8000/transcribe",
         data={"model": "moss-transcribe-diarize", "formats": "srt,json"},
-        files={"audio": f},
+        files={"file": f},
     )
 data = r.json()
 print(f"{data['num_speakers']} 个说话人, {len(data['segments'])} 段")
@@ -315,7 +406,8 @@ subforge/
 │   │   ├── __init__.py
 │   │   ├── base.py          # BaseBackend 协议
 │   │   ├── funasr_backend.py # FunASR AutoModel 适配器（默认）
-│   │   └── moss_backend.py  # MOSS-Transcribe-Diarize 适配器
+│   │   ├── moss_backend.py  # MOSS-Transcribe-Diarize 适配器
+│   │   └── vllm_backend.py  # vLLM 服务端适配器
 │   ├── config.py           # load_registry() / ModelSpec
 │   ├── models.py           # ModelRegistry（按 backend 分发）
 │   ├── transcriber.py      # Transcriber（委托给 backend）+ TranscriptResult 归一化
@@ -342,7 +434,6 @@ subforge/
 - **MOSS 后端推理速度** —— 5 分钟音频推理约 5–6 分钟（RTX 4070 Ti），模型 ~RTF 1.0。短音频建议用 `paraformer-zh`（同 5 分钟 ~15 秒）。MOSS 的优点是长会议场景下单次推理就完成说话人分离。
 - **MOSS 首次下载** —— 首次使用从 HuggingFace Hub 下载约 1.8 GB safetensors，缓存在 `~/.cache/huggingface/hub/`。
 - **MOSS 不支持 `--spk-num`** —— 说话人数由模型自动检测。用 `--max-new-tokens` 控制生成长度上限（默认 65536）。
-- **未开 CORS** —— 服务不设 CORS 头。跨域浏览器客户端需要 CORS 代理，或把 UI 部署在同一源。
 - **Windows 控制台编码** —— Windows 控制台默认 GBK；CLI 自动重配为 UTF-8。如果还看到中文乱码，设 `PYTHONIOENCODING=utf-8`。
 
 ## 依赖

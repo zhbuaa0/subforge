@@ -85,12 +85,19 @@ class ModelRegistry:
         """Dispatch to the right backend class based on ``spec.backend``.
 
         Importing backends lazily keeps the FunASR-only code path from
-        paying any import cost for MOSS / transformers.
+        paying any import cost for MOSS / transformers / vLLM.
         """
         if spec.backend == "moss":
             from .backends.moss_backend import MossBackend
 
             return MossBackend(spec)
+        if spec.backend == "vllm":
+            # MossVllmBackend also lives under backends/. Lazy import keeps
+            # FunASR-only users from paying even the urllib stream-parser
+            # import cost.
+            from .backends.vllm_backend import MossVllmBackend
+
+            return MossVllmBackend(spec)
         # default — preserves original funasr-only behaviour
         from .backends.funasr_backend import FunasrBackend
 

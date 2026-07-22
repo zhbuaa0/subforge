@@ -171,9 +171,6 @@ include-package-data = true
 [tool.setuptools.package-data]
 subforge = ["py.typed", "web/*.html"]
 
-[tool.setuptools.package_dir]
-"" = "."
-
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
 testpaths = ["tests"]
